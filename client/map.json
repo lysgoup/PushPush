@@ -1,0 +1,77 @@
+{
+    "mapsize":{
+        "rows":20,
+	    "cols":20
+    },
+
+    "timeout" : 10000,
+
+    "user":[
+		{
+            "id" : 0,
+			"baseX" : 1, 
+			"baseY" : 1, 
+			"userX" : 2,
+			"userY" : 1
+		},
+        {
+            "id" : 1,
+			"baseX" : 18, 
+			"baseY" : 1, 
+			"userX" : 17,
+			"userY" : 1
+		},
+        {
+            "id" : 2,
+			"baseX" : 1, 
+			"baseY" : 18, 
+			"userX" : 2,
+			"userY" : 18
+		},
+        {
+            "id" : 3,
+			"baseX" : 18, 
+			"baseY" : 18, 
+			"userX" : 17,
+			"userY" : 18
+		}
+    ],
+
+    "obstacle":[
+		{ 
+			"obstacleX" : 3,
+			"obstacleY" : 3
+		},
+        { 
+			"obstacleX" : 5,
+			"obstacleY" : 5
+		},
+        { 
+			"obstacleX" : 6,
+			"obstacleY" : 2
+		},
+        { 
+			"obstacleX" : 13,
+			"obstacleY" : 4
+		}
+    ],
+
+    "ball": [
+		{
+			"ballX" : 6,
+			"ballY" : 3
+		},
+        {
+			"ballX" : 2,
+			"ballY" : 8
+		},
+        {
+			"ballX" : 1,
+			"ballY" : 10
+		},
+        {
+			"ballX" : 15,
+			"ballY" : 11
+		}
+    ]
+}

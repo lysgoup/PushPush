@@ -6,6 +6,8 @@
 #include <sys/time.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include "cJSON/cJSON.c"
+#include "cJSON/cJSON.h"
 
 #define USER_COUNT 4
 #define MAX_NAME_SIZE 8
@@ -40,6 +42,7 @@ typedef struct Model{
 
 //Global
 Model model;
+struct timeval start_time;
 char myname[MAX_NAME_SIZE+1];
 char* usernames[USER_COUNT];
 
@@ -67,6 +70,7 @@ int recv_bytes(int fd, void * buf, size_t len){
     while (acc < len) {
         size_t received ;
         received = recv(fd, p, len - acc, MSG_NOSIGNAL) ;
+        // printf("%ld: %s\n",received,(char*)buf);
         if (received == 0)
             return 1 ;
         p += received ;
@@ -118,26 +122,44 @@ int main (int argc, char * argv[])
         strcpy(usernames[i],buf);
     }
 
+    //! test
+    for(int i=0;i<4;i++){
+        printf("username: %s\n", usernames[i]);
+    }
+    
     //JSON 파일 크기 수신
     if(recv_bytes(sock, &filesize, sizeof(filesize))){
         fprintf(stderr,"Failed to receive filesize\n");
         exit(EXIT_FAILURE);
     };
+    //! test
+    printf("filesize: %d\n",filesize);
+
     //JSON 파일 수신
     FILE * fp = fopen("map.json", "wb");
     int received = 0;
+    int r = 0;
     while(received < filesize){
-        received += recv(sock, buf, sizeof(buf), MSG_NOSIGNAL) ;
-        fwrite(buf,sizeof(buf),1,fp);
+        r = recv(sock, buf, sizeof(buf), MSG_NOSIGNAL) ;
+        received += r;
+        printf("%d\n",received);
+        fwrite(buf,r,1,fp);
     }
     fclose(fp);
 
+    //TODO: JSON파일 파싱하고 모델 생성
+    
+
     // timestamp 수신
-    if(recv_bytes(sock, &model.timeout, sizeof(model.timeout))){
+    if(recv_bytes(sock, &start_time, sizeof(start_time))){
         fprintf(stderr,"Failed to receive timeout\n");
         exit(EXIT_FAILURE);
     }; 
+    //! test
+    printf("%ld:%ld\n",start_time.tv_sec,start_time.tv_usec);
 
+
+    //TODO: Game Start
     // pthread_t tid[2];
     return 0;
 }
