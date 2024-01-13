@@ -40,21 +40,58 @@ typedef struct Model{
     int n_balls;
 }Model;
 
+typedef struct Timer{
+    GtkWidget *label;
+    int counter;
+} Timer;
+
+int compare(const void* a, const void* b);
 void show_view();
 int send_bytes(int fd, void * buf, size_t len);
 int recv_bytes(int fd, void * buf, size_t len);
-void parse_json(int filesize);
-int read_mapfile(char * map_info);
-void print_model(Model *map);
+// void parse_json(int filesize);
+int read_mapinfo(char * map_info);
+void print_model();
 void init_view(int row, int col);
 void update_view();
+int find_id(char * nickname);
+void * input(void * arg);
+void * free_view(void * arg);
+void select_image(int i, int j);
+
+void update_board_grid();
+void update_score_board();
+gboolean update_counter(Timer *data);
+void on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer user_data);
 
 //Global
 Model map;
-char ** view;
+char ** view = NULL;
+char ** old_view = NULL;
 struct timeval start_time;
 char myname[MAX_NAME_SIZE+1];
-char* usernames[USER_COUNT];
+int sock;
+int userid;
+char image_name[32];
+// char* usernames[USER_COUNT];
+
+//Global for GTK
+GtkWidget *window;
+GtkWidget *main_grid;
+GtkWidget *board_grid = NULL;
+GtkWidget *time_and_score_grid;
+GtkWidget *score_label;
+GtkWidget *image;
+Timer data;
+char scoreboard[128];
+char time_left[64];
+char msg_info[16];
+
+int compare(const void* a, const void* b) {
+    User* userA = *(User**)a;
+    User* userB = *(User**)b;
+    return userB->score - userA->score;
+}
 
 void show_view(){
     for(int i=0;i<map.row;i++){
@@ -104,17 +141,8 @@ int recv_bytes(int fd, void * buf, size_t len){
 }
 
 
-void parse_json(int filesize){
-    char map_info[filesize];
-    FILE * fp = fopen("map.json", "rb");
-    size_t result = fread(map_info, 1, filesize, fp);
-    printf("%s",map_info);
-    fclose(fp); 
-    read_mapfile(map_info);
-}
-
 // if it was succeed return 0, otherwise return 1
-int read_mapfile(char * map_info) {
+int read_mapinfo(char * map_info) {
     // parse the JSON data 
     cJSON *json = cJSON_Parse(map_info); 
 
@@ -134,7 +162,8 @@ int read_mapfile(char * map_info) {
     map.col = j_col->valueint;
 
     cJSON *j_timeout = cJSON_GetObjectItemCaseSensitive(json, "timeout");
-    gettimeofday(&map.timeout, NULL);
+    map.timeout.tv_sec = (j_timeout->valueint)/1000;
+    map.timeout.tv_usec = 0;
 
     int i;
 
@@ -162,11 +191,13 @@ int read_mapfile(char * map_info) {
         strcpy(map.users[i].name, j_name->valuestring);
 
     }
+
     cJSON * j_obstacle = cJSON_GetObjectItem(json,"obstacle");
     cJSON * x, * y;
     map.n_obstacles = cJSON_GetArraySize(j_obstacle);
     map.obstacles = malloc(sizeof(Pos) * map.n_obstacles);
     
+    printf("%d\n", map.n_obstacles);
     for (i = 0 ; i < cJSON_GetArraySize(j_obstacle) ; i++){
         subitem = cJSON_GetArrayItem(j_obstacle, i);
         x = cJSON_GetArrayItem(subitem, 0);
@@ -188,36 +219,36 @@ int read_mapfile(char * map_info) {
         map.balls[i].x = x->valueint;
         map.balls[i].y = y->valueint;
     }
-    
+    free(json);
     return 0;
 }
 
-void print_model(Model *map) {
-    printf("Row: %d\n", map->row);
-    printf("Col: %d\n", map->col);
+void print_model() {
+    printf("Row: %d\n", map.row);
+    printf("Col: %d\n", map.col);
 
-    printf("Timeout: %ld seconds\n", map->timeout.tv_sec);
+    printf("Timeout: %ld seconds\n", map.timeout.tv_sec);
 
     printf("Users:\n");
     for (int i = 0; i < 4; i++) {
         printf("  User %d:\n", i + 1);
-        printf("    ID: %d\n", map->users[i].id);
-        printf("    User X: %d\n", map->users[i].user_x);
-        printf("    User Y: %d\n", map->users[i].user_y);
-        printf("    Base X: %d\n", map->users[i].base_x);
-        printf("    Base Y: %d\n", map->users[i].base_y);
-        printf("    Score: %d\n", map->users[i].score);
-        printf("    Name: %s\n", map->users[i].name);
+        printf("    ID: %d\n", map.users[i].id);
+        printf("    User X: %d\n", map.users[i].user_x);
+        printf("    User Y: %d\n", map.users[i].user_y);
+        printf("    Base X: %d\n", map.users[i].base_x);
+        printf("    Base Y: %d\n", map.users[i].base_y);
+        printf("    Score: %d\n", map.users[i].score);
+        printf("    Name: %s\n", map.users[i].name);
     }
 
     printf("Obstacles:\n");
-    for (int i = 0; i < map->n_obstacles; i++) {
-        printf("  Obstacle %d: X: %d, Y: %d\n", i + 1, map->obstacles[i].x, map->obstacles[i].y);
+    for (int i = 0; i < map.n_obstacles; i++) {
+        printf("  Obstacle %d: X: %d, Y: %d\n", i + 1, map.obstacles[i].x, map.obstacles[i].y);
     }
 
     printf("Balls:\n");
-    for (int i = 0; i < map->n_balls; i++) {
-        printf("  Ball %d: X: %d, Y: %d\n", i + 1, map->balls[i].x, map->balls[i].y);
+    for (int i = 0; i < map.n_balls; i++) {
+        printf("  Ball %d: X: %d, Y: %d\n", i + 1, map.balls[i].x, map.balls[i].y);
     }
 }
 
@@ -225,7 +256,6 @@ void print_model(Model *map) {
 
 void init_view(int row, int col){
     view = (char **)malloc(row * sizeof(char *));
-    //!
     for(int i = 0; i < row; i++) {
         view[i] = (char *)malloc(col * sizeof(char));
         memset(view[i], 0, col);
@@ -243,6 +273,18 @@ void init_view(int row, int col){
 }
 
 void update_view(){
+    pthread_t free_pid;
+    if (pthread_create(&free_pid, NULL, (void*)free_view, (void*)old_view)) {
+        perror("making thread failed\n");
+        exit(EXIT_FAILURE);
+    }
+    // pthread_detach(free_pid);
+    pthread_join(free_pid,NULL);
+
+    old_view = view;
+
+    init_view(map.row, map.col);
+
     //obstacle
     for (int i = 0; i < map.n_obstacles; i++) {
         view[map.obstacles[i].y][map.obstacles[i].x] = 'O';
@@ -265,9 +307,237 @@ void update_view(){
     }
 }
 
+// if it was succeed return positive num, otherwise return -1
+int find_id(char * nickname) {
+    for (int i = 0; i < USER_COUNT; i++) {
+        if(strcmp(map.users[i].name, nickname)==0){
+            return map.users[i].id;
+        }
+    }
+    return -1;
+}
+
+void * input(void * arg) {
+    char buf[2];
+    int result;
+    int k, c, i;
+
+    // receive echoed direction
+    while ((result = recv_bytes(sock, buf, 2)) != 1) {
+        printf("<<<<<<<------k: %d      buf: %s------>>>>>>>>>\n", k++, buf);
+
+        if (strncmp(buf, "FN", 2) == 0 || strncmp(buf, "TO", 2) == 0) {
+            data.counter = -1; 
+            // gtk_label_set_text(GTK_LABEL(data.label), "Game Over!!");
+            gtk_widget_show_all(window);
+            break;
+        }
+
+        // update user
+        if (buf[1] == 'U') {
+            // move user
+            map.users[buf[0] - '0'].user_y--;
+        }
+        else if (buf[1] == 'L') {
+            map.users[buf[0] - '0'].user_x--;
+        }
+        else if (buf[1] == 'R') {
+            map.users[buf[0] - '0'].user_x++;
+        }
+        else if (buf[1] == 'D') {
+            map.users[buf[0] - '0'].user_y++;
+        }
+
+        // update ball
+        for (i = 0; i < map.n_balls; i++) {
+            if ((map.users[buf[0] - '0'].user_x == map.balls[i].x) && (map.users[buf[0] - '0'].user_y == map.balls[i].y)) {
+                // move ball
+                if (buf[1] == 'U') {
+                    map.balls[i].y--;
+                }
+                else if (buf[1] == 'L') {
+                    map.balls[i].x--;
+                }
+                else if (buf[1] == 'R') {
+                    map.balls[i].x++;
+                }
+                else if (buf[1] == 'D') {
+                    map.balls[i].y++;
+                }
+                
+                // if ball encouter in base
+                for (c = 0; c < 4; c++) {
+                    if ((map.users[c].base_x == map.balls[i].x) && (map.users[c].base_y == map.balls[i].y)) {
+                        // update score;
+                        map.users[c].score++;
+                        map.balls[i].x = map.balls[map.n_balls - 1].x;
+                        map.balls[i].y = map.balls[map.n_balls - 1].y;
+                        // free(&map.balls[map.n_balls - 1]);
+                        map.n_balls--;
+                    }
+                }
+                break;
+            }
+        }
+        print_model();
+        update_view(); 
+        show_view();
+        update_board_grid();
+        update_score_board();
+        gtk_widget_show_all(window);
+    }
+
+    if (result == 1) {
+        fprintf(stderr, "receive echoed direction failed\n");
+    }
+    
+
+    return NULL;
+} 
+
+void * free_view(void *arg){
+    char ** view_to_free = (char**)arg;
+    if(arg == NULL){
+        return NULL;
+    }
+    for(int i = 0; i < map.row; i++) {
+        free(view_to_free[i]);
+    }
+    free(view_to_free);
+    return NULL;
+}
+
+void select_image(int i, int j){
+    if(view[i][j]=='\0'){
+        strcpy(image_name,"../image/background.png");
+    }
+    else if(view[i][j]=='O'){
+        strcpy(image_name,"../image/tree.png");
+    }
+    else if(view[i][j]=='B'){
+        strcpy(image_name,"../image/egg.png");
+    }
+    else if(view[i][j]=='0'){
+        strcpy(image_name,"../image/player0.png");
+    }
+    else if(view[i][j]=='1'){
+        strcpy(image_name,"../image/player1.png");
+    }
+    else if(view[i][j]=='2'){
+        strcpy(image_name,"../image/player2.png");
+    }
+    else if(view[i][j]=='3'){
+        strcpy(image_name,"../image/player3.png");
+    }
+    else if(view[i][j]=='4'){
+        strcpy(image_name,"../image/base0.png");
+    }
+    else if(view[i][j]=='5'){
+        strcpy(image_name,"../image/base1.png");
+    }
+    else if(view[i][j]=='6'){
+        strcpy(image_name,"../image/base2.png");
+    }
+    else if(view[i][j]=='7'){
+        strcpy(image_name,"../image/base3.png");
+    }
+    else{
+        strcpy(image_name,"../image/ground.png");
+    } 
+}
+
+void update_board_grid(){
+    if(board_grid == NULL){
+        printf("check1\n");
+        board_grid = gtk_grid_new();
+        gtk_widget_set_size_request(board_grid, 200, 200);
+        gtk_grid_attach(GTK_GRID(main_grid), board_grid, 0, 0, 1, 4);
+        for (int i = 0; i < map.row; i++) {
+            for (int j = 0; j < map.col; j++) {
+                select_image(i,j);
+                image = gtk_image_new_from_file(image_name);
+                gtk_grid_attach(GTK_GRID(board_grid), image, j, i, 1, 1);
+            }
+        }
+    }
+    else{
+        printf("check2\n");
+        for (int i = 0; i < map.row; i++) {
+            for (int j = 0; j < map.col; j++) {
+                if(old_view[i][j] != view[i][j]){
+                    image = gtk_grid_get_child_at(GTK_GRID(board_grid), j, i);
+                    select_image(i,j);
+                    gtk_image_set_from_file(GTK_IMAGE(image), image_name);
+                }
+            }
+        }
+    }
+    
+}
+
+gboolean update_counter(Timer *data) {
+    char t_buffer[256];
+    if(data->counter != -1){
+        data->counter--;
+        sprintf(t_buffer, "%d seconds left!!\n", data->counter);
+    
+        gtk_label_set_text(GTK_LABEL(data->label), t_buffer); 
+    }
+
+    if (data->counter <= 0) {
+        return FALSE; 
+    } else {
+        return TRUE;
+    }
+}
+
+void update_score_board(){
+    User * score_chart[USER_COUNT];
+    for (int i = 0; i < USER_COUNT; i++) {
+        score_chart[i] = &map.users[i];
+    }
+    qsort(score_chart, 4, sizeof(User*), compare);
+    sprintf(scoreboard,"****Score Board****\n 1. %s: %d\n 2. %s: %d\n 3. %s: %d\n 4. %s: %d\n", score_chart[0]->name,score_chart[0]->score,score_chart[1]->name,score_chart[1]->score,score_chart[2]->name,score_chart[2]->score,score_chart[3]->name,score_chart[3]->score);
+    gtk_label_set_text(GTK_LABEL(score_label), scoreboard);
+    // gtk_grid_attach(GTK_GRID(main_grid), score_label, 2, 2, 1, 1);
+}
+
+void on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer user_data) {
+    char cmd[3];
+    printf("%d\n", userid);
+
+    switch (event->keyval) {
+        case GDK_KEY_Up:
+            g_print("Up key pressed\n");
+            snprintf(cmd, 3, "%dU", userid);
+            break;
+        case GDK_KEY_Down:
+            g_print("Down key pressed\n");
+            snprintf(cmd, 3, "%dD", userid);
+            break;
+        case GDK_KEY_Left:
+            g_print("Left key pressed\n");
+            snprintf(cmd, 3, "%dL", userid);
+            break;
+        case GDK_KEY_Right:
+            g_print("Right key pressed\n");
+            snprintf(cmd, 3, "%dR", userid);
+            break;
+        default:
+            break;
+    }
+
+    // send cmd to server
+    if (send_bytes(sock, cmd, 2) == 1) {
+        fprintf(stderr, "send key failed\n");
+    }
+    printf("msg sent: %s\n", cmd);
+}
+
+
 int main (int argc, char * argv[])
 {
-    int sock, filesize;
+    int filesize;
 	struct sockaddr_in serv_adr;
     char buf[BUF_SIZE];
 
@@ -296,22 +566,22 @@ int main (int argc, char * argv[])
         fprintf(stderr,"Failed to send user name\n");
         exit(EXIT_FAILURE);
     }
-    shutdown(sock,SHUT_WR);
+    // shutdown(sock,SHUT_WR);
 
     // user list 수신
-    for(int i=0;i<4;i++){
-        if(recv_bytes(sock, buf, sizeof(buf))){
-            fprintf(stderr,"Failed to receive user list\n");
-            exit(EXIT_FAILURE);
-        };
-        usernames[i] = (char*)malloc(sizeof(char*));
-        strcpy(usernames[i],buf);
-    }
+    // for(int i=0;i<4;i++){
+    //     if(recv_bytes(sock, buf, sizeof(buf))){
+    //         fprintf(stderr,"Failed to receive user list\n");
+    //         exit(EXIT_FAILURE);
+    //     };
+    //     usernames[i] = (char*)malloc(sizeof(char*));
+    //     strcpy(usernames[i],buf);
+    // }
 
-    //! test
-    for(int i=0;i<4;i++){
-        printf("username: %s\n", usernames[i]);
-    }
+    // //! test
+    // for(int i=0;i<4;i++){
+    //     printf("username: %s\n", usernames[i]);
+    // }
     
     //JSON 파일 크기 수신
     if(recv_bytes(sock, &filesize, sizeof(filesize))){
@@ -320,32 +590,46 @@ int main (int argc, char * argv[])
     };
     //! test
     printf("filesize: %d\n",filesize);
-
+    
     //JSON 파일 수신
-    FILE * fp = fopen("map.json", "wb");
-    size_t received = 0;
-    size_t r = 0;
-    size_t acc = 0;
-    while(received < filesize){
-        acc = filesize-received;
-        if(sizeof(buf)>acc){
-            r = recv(sock, buf, acc, MSG_NOSIGNAL) ; 
-        }
-        else{
-            r = recv(sock, buf, sizeof(buf), MSG_NOSIGNAL) ;
-        }
-        received += r;
-        printf("%ld\n",received);
-        fwrite(buf,r,1,fp);
+    // FILE * fp = fopen("map.json", "wb");
+    // size_t received = 0;
+    // size_t r = 0;
+    // size_t acc = 0;
+    // while(received < filesize){
+    //     acc = filesize-received;
+    //     if(sizeof(buf)>acc){
+    //         r = recv(sock, buf, acc, MSG_NOSIGNAL) ; 
+    //     }
+    //     else{
+    //         r = recv(sock, buf, sizeof(buf), MSG_NOSIGNAL) ;
+    //     }
+    //     received += r;
+    //     printf("%ld\n",received);
+    //     fwrite(buf,r,1,fp);
+    // }
+    // fclose(fp);
+    char map_info[filesize+1];
+    char * p = map_info ;
+    size_t acc = 0 ;
+    while (acc < filesize) {
+        size_t received ;
+        received = recv(sock, p, filesize - acc, MSG_NOSIGNAL) ;
+        // printf("%ld: %s\n",received,(char*)buf);
+        if (received == 0)
+            break;
+        p += received ;
+        acc += received ;
     }
-    fclose(fp);
+    map_info[filesize] = '\0';
+    printf("%ld\n",acc);
+    printf("%s\n",map_info);
+     
 
-    //TODO: JSON파일 파싱하고 모델 생성
-    parse_json(filesize);
-    print_model(&map);
-
-    //TODO: 모델을 가지고 view 생성
-    init_view(map.row, map.col);
+    //TODO: JSON 파싱하고 모델 생성
+    read_mapinfo(map_info);
+    print_model();
+    // init_view(map.row, map.col);
     update_view();
     //! test
     show_view();
@@ -358,8 +642,72 @@ int main (int argc, char * argv[])
     //! test
     printf("%ld:%ld\n",start_time.tv_sec,start_time.tv_usec);
 
+    userid = find_id(myname); 
+
+    // make thread
+
     //TODO: Game Start
+    //gtk 시작
+    //initialize board
+    gtk_init(&argc, &argv);
+    //window setting
+    window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(window), "PushPush");
+    gtk_window_set_default_size(GTK_WINDOW(window), 500, 400);
+    gtk_container_set_border_width(GTK_CONTAINER(window), 10);
+    gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER);
+
+    g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+    g_signal_connect(window, "key-press-event", G_CALLBACK(on_key_press), NULL);
+
+    //make main grid
+    main_grid = gtk_grid_new();
+    gtk_container_add(GTK_CONTAINER(window), main_grid);
+    //make board grid
+    update_board_grid();
+    //make score and time grid
+    // time_and_score_grid = gtk_grid_new();
+
+    //make timer
+    sprintf(time_left,"%ld seconds left!!\n",map.timeout.tv_usec);
+    data.label = gtk_label_new(time_left);
+    data.counter = (int)map.timeout.tv_sec;
+    gtk_grid_attach(GTK_GRID(main_grid), data.label, 2, 1, 1, 1);
+    g_timeout_add_seconds(1, (GSourceFunc)update_counter, &data);
+
+    //show icon
+    if(userid==0){
+        image = gtk_image_new_from_file("../image/player0.png");
+    }
+    else if(userid==1){
+        image = gtk_image_new_from_file("../image/player1.png");
+    }
+    else if(userid==2){
+        image = gtk_image_new_from_file("../image/player2.png");
+    }
+    else if(userid==3){
+        image = gtk_image_new_from_file("../image/player3.png");
+    }
+    gtk_grid_attach(GTK_GRID(main_grid), image, 2, 2, 1, 1); 
     
 
+    //make score board
+    sprintf(scoreboard,"****Score Board****\n 1. %s: %d\n 2. %s: %d\n 3. %s: %d\n 4. %s: %d\n", map.users[0].name,map.users[0].score,map.users[1].name,map.users[1].score,map.users[2].name,map.users[2].score,map.users[3].name,map.users[3].score);
+    score_label = gtk_label_new(scoreboard);
+    gtk_grid_attach(GTK_GRID(main_grid), score_label, 2, 3, 1, 1);
+
+    gtk_widget_show_all(window);
+    gtk_widget_grab_focus(window);
+    pthread_t input_pid;
+    if (pthread_create(&input_pid, NULL, (void*)input, NULL)) {
+        perror("making thread failed\n");
+        exit(EXIT_FAILURE);
+    }
+    gtk_main();
+    printf("here1\n");
+    pthread_join(input_pid, NULL);
+    printf("here2\n");
+    close(sock);
+    printf("THE END\n");
     return 0;
 }
