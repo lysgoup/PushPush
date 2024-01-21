@@ -9,6 +9,7 @@
 #include "cJSON/cJSON.c"
 #include "cJSON/cJSON.h"
 #include <gtk/gtk.h>
+#include <glib.h>
 
 #define USER_COUNT 4
 #define MAX_NAME_SIZE 8
@@ -45,42 +46,43 @@ typedef struct Timer{
     int counter;
 } Timer;
 
+typedef struct Queue{
+    char **view;
+    struct Queue *next;
+}Queue;
+
 int compare(const void* a, const void* b);
-void show_view();
+void show_view(char **tail);
 int send_bytes(int fd, void * buf, size_t len);
 int recv_bytes(int fd, void * buf, size_t len);
-// void parse_json(int filesize);
 int read_mapinfo(char * map_info);
-void print_model();
-void init_view(int row, int col);
+char** init_view(int row, int col);
 void update_view();
 int find_id(char * nickname);
 void * input(void * arg);
-void * free_view(void * arg);
-void select_image(int i, int j);
+void * free_node(void *arg);
+void select_image(char** view,int i, int j);
 
+gboolean update_board_grid_and_score_board();
 gboolean update_counter(Timer *data);
-gboolean update_game_and_score_board();
 void on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer user_data);
 
 //Global
 Model map;
-char ** view = NULL;
-char ** old_view = NULL;
+int q_count;
+Queue *old_node;
 struct timeval start_time;
 char myname[MAX_NAME_SIZE+1];
 int sock;
 int userid;
 char image_name[32];
-int modified;
-pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-// char* usernames[USER_COUNT];
+Queue *head, *tail;
+pthread_mutex_t queue_lock = PTHREAD_MUTEX_INITIALIZER;
 
 //Global for GTK
 GtkWidget *window;
 GtkWidget *main_grid;
 GtkWidget *board_grid = NULL;
-GtkWidget *time_and_score_grid;
 GtkWidget *score_label;
 GtkWidget *image;
 Timer data;
@@ -94,17 +96,20 @@ int compare(const void* a, const void* b) {
     return userB->score - userA->score;
 }
 
-void show_view(){
-    for(int i=0;i<map.row;i++){
-        for(int j=0;j<map.col;j++){
-            if(view[i][j] == '\0'){
-               printf("?  "); 
+void show_view(char **tail){
+    if(tail == NULL) printf("There is no view\n");
+    else{
+        for(int i=0;i<map.row;i++){
+            for(int j=0;j<map.col;j++){
+                if(tail[i][j] == '\0'){
+                printf("?  "); 
+                }
+                else{
+                    printf("%c  ",tail[i][j]);
+                }
             }
-            else{
-                printf("%c  ",view[i][j]);
-            }
-        }
-        printf("\n");
+            printf("\n");
+        } 
     }
 }
 
@@ -224,67 +229,28 @@ int read_mapinfo(char * map_info) {
     return 0;
 }
 
-void print_model() {
-    printf("Row: %d\n", map.row);
-    printf("Col: %d\n", map.col);
-
-    printf("Timeout: %ld seconds\n", map.timeout.tv_sec);
-
-    printf("Users:\n");
-    for (int i = 0; i < 4; i++) {
-        printf("  User %d:\n", i + 1);
-        printf("    ID: %d\n", map.users[i].id);
-        printf("    User X: %d\n", map.users[i].user_x);
-        printf("    User Y: %d\n", map.users[i].user_y);
-        printf("    Base X: %d\n", map.users[i].base_x);
-        printf("    Base Y: %d\n", map.users[i].base_y);
-        printf("    Score: %d\n", map.users[i].score);
-        printf("    Name: %s\n", map.users[i].name);
-    }
-
-    printf("Obstacles:\n");
-    for (int i = 0; i < map.n_obstacles; i++) {
-        printf("  Obstacle %d: X: %d, Y: %d\n", i + 1, map.obstacles[i].x, map.obstacles[i].y);
-    }
-
-    printf("Balls:\n");
-    for (int i = 0; i < map.n_balls; i++) {
-        printf("  Ball %d: X: %d, Y: %d\n", i + 1, map.balls[i].x, map.balls[i].y);
-    }
-}
-
-
-
-void init_view(int row, int col){
-    view = (char **)malloc(row * sizeof(char *));
+char **init_view(int row, int col){
+    char **new_view = (char **)malloc(sizeof(char *) * row);
     for(int i = 0; i < row; i++) {
-        view[i] = (char *)malloc(col * sizeof(char));
-        memset(view[i], 0, col);
+        new_view[i] = (char *)malloc(sizeof(char) * col);
+        memset(new_view[i], 0, col);
     }
 
     //테두리 처리
     for(int i=0; i<row; i++){
-        view[i][0] = 'O';
-        view[i][col-1] = 'O'; 
+        new_view[i][0] = 'O';
+        new_view[i][col-1] = 'O'; 
     }
     for(int i=0; i<col; i++){
-        view[0][i] = 'O';
-        view[row-1][i] = 'O'; 
+        new_view[0][i] = 'O';
+        new_view[row-1][i] = 'O'; 
     }
+
+    return new_view;
 }
 
 void update_view(){
-    pthread_mutex_lock(&lock);
-    char **temp = view;
-    pthread_t free_pid;
-    if (pthread_create(&free_pid, NULL, (void*)free_view, (void*)temp)) {
-        perror("making thread failed\n");
-        exit(EXIT_FAILURE);
-    }
-    pthread_detach(free_pid);
-    // pthread_join(free_pid,NULL);
-
-    init_view(map.row, map.col);
+    char **view = init_view(map.row, map.col);
 
     //obstacle
     for (int i = 0; i < map.n_obstacles; i++) {
@@ -306,8 +272,22 @@ void update_view(){
         char c = (map.users[i].id+4) + '0';
         view[map.users[i].base_y][map.users[i].base_x] = c;
     }
-    modified = 1;
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&queue_lock);
+    Queue *new_node = (Queue *)malloc(sizeof(Queue));
+    new_node->view = view;
+    new_node->next = NULL;
+    if(head==NULL){
+        head = new_node;
+        tail = new_node;
+    }
+    else{
+        tail->next = new_node;
+        tail = new_node;
+    }
+    // show_view(view);
+    q_count++;
+    printf("q_count: %d\n",q_count);
+    pthread_mutex_unlock(&queue_lock);
 }
 
 // if it was succeed return positive num, otherwise return -1
@@ -380,12 +360,7 @@ void * input(void * arg) {
                 break;
             }
         }
-        print_model();
         update_view(); 
-        show_view();
-        // update_board_grid();
-        // update_score_board();
-        // gtk_widget_show_all(window);
     }
 
     if (result == 1) {
@@ -396,19 +371,17 @@ void * input(void * arg) {
     return NULL;
 } 
 
-void * free_view(void *arg){
-    char ** view_to_free = (char**)arg;
-    if(arg == NULL){
-        return NULL;
-    }
+void *free_node(void *arg){
+    char ** view_to_free = ((Queue *)arg)->view;
     for(int i = 0; i < map.row; i++) {
         free(view_to_free[i]);
     }
     free(view_to_free);
+    free(arg);
     return NULL;
 }
 
-void select_image(int i, int j){
+void select_image(char** view, int i, int j){
     if(view[i][j]=='\0'){
         strcpy(image_name,"../image/background.png");
     }
@@ -466,41 +439,40 @@ gboolean update_counter(Timer *data) {
     }
 }
 
-gboolean update_game_and_score_board() {
-    pthread_mutex_lock(&lock);
-    if(modified == 0) {
-        pthread_mutex_unlock(&lock); 
-        return TRUE;
-    }
-    for (int i = 0; i < map.row; i++) {
-        for (int j = 0; j < map.col; j++) {
-            if(old_view[i][j] != view[i][j]){
-                image = gtk_grid_get_child_at(GTK_GRID(board_grid), j, i);
-                select_image(i,j);
-                gtk_image_set_from_file(GTK_IMAGE(image), image_name);
+gboolean update_board_grid_and_score_board(){
+    pthread_mutex_lock(&queue_lock);
+    while(head!=NULL){
+        char **view = head->view;
+        char **old_view = old_node->view;
+        for (int i = 0; i < map.row; i++) {
+            for (int j = 0; j < map.col; j++) {
+                if(old_view[i][j] != view[i][j]){
+                    image = gtk_grid_get_child_at(GTK_GRID(board_grid), j, i);
+                    select_image(view,i,j);
+                    gtk_image_set_from_file(GTK_IMAGE(image), image_name);
+                }
             }
         }
-    }
-    char **temp = old_view;
-    pthread_t free_pid;
-    if (pthread_create(&free_pid, NULL, (void*)free_view, (void*)temp)) {
-        perror("making thread failed\n");
-        exit(EXIT_FAILURE);
-    }
-    pthread_detach(free_pid);
+        pthread_t free_pid;
+        if (pthread_create(&free_pid, NULL, (void*)free_node, (void*)old_node)) {
+            perror("making thread failed\n");
+            exit(EXIT_FAILURE);
+        }
+        pthread_detach(free_pid);
+        old_node = head;
+        head = head->next;
+        q_count--;
+        printf("q_count: %d\n",q_count);
 
-    old_view = view;
-    view = NULL;
-    modified = 0;
-
-    User * score_chart[USER_COUNT];
-    for (int i = 0; i < USER_COUNT; i++) {
-        score_chart[i] = &map.users[i];
+        User * score_chart[USER_COUNT];
+        for (int i = 0; i < USER_COUNT; i++) {
+            score_chart[i] = &map.users[i];
+        }
+        qsort(score_chart, 4, sizeof(User*), compare);
+        sprintf(scoreboard,"****Score Board****\n 1. %s: %d\n 2. %s: %d\n 3. %s: %d\n 4. %s: %d\n", score_chart[0]->name,score_chart[0]->score,score_chart[1]->name,score_chart[1]->score,score_chart[2]->name,score_chart[2]->score,score_chart[3]->name,score_chart[3]->score);
+        gtk_label_set_text(GTK_LABEL(score_label), scoreboard);
     }
-    qsort(score_chart, 4, sizeof(User*), compare);
-    sprintf(scoreboard,"****Score Board****\n 1. %s: %d\n 2. %s: %d\n 3. %s: %d\n 4. %s: %d\n", score_chart[0]->name,score_chart[0]->score,score_chart[1]->name,score_chart[1]->score,score_chart[2]->name,score_chart[2]->score,score_chart[3]->name,score_chart[3]->score);
-    gtk_label_set_text(GTK_LABEL(score_label), scoreboard);
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_unlock(&queue_lock);
     return TRUE;
 }
 
@@ -630,11 +602,9 @@ int main (int argc, char * argv[])
 
     //TODO: JSON 파싱하고 모델 생성
     read_mapinfo(map_info);
-    print_model();
-    // init_view(map.row, map.col);
+    printf("here1: %p\n",head);
     update_view();
-    //! test
-    show_view();
+    printf("here2\n");
 
     // timestamp 수신
     if(recv_bytes(sock, &start_time, sizeof(start_time))){
@@ -646,7 +616,6 @@ int main (int argc, char * argv[])
 
     userid = find_id(myname); 
 
-    // make thread
 
     //TODO: Game Start
     //gtk 시작
@@ -669,23 +638,26 @@ int main (int argc, char * argv[])
     board_grid = gtk_grid_new();
     gtk_widget_set_size_request(board_grid, 200, 200);
     gtk_grid_attach(GTK_GRID(main_grid), board_grid, 0, 0, 1, 4);
+    printf("here3: %p\n",head);
     for (int i = 0; i < map.row; i++) {
         for (int j = 0; j < map.col; j++) {
-            select_image(i,j);
+            printf("here4\n");
+            select_image(head->view,i,j);
+            printf("here5\n");
             image = gtk_image_new_from_file(image_name);
             gtk_grid_attach(GTK_GRID(board_grid), image, j, i, 1, 1);
         }
     }
-    old_view = view;
-    view = NULL;
-    modified = 0;
+    old_node = head;
+    head = NULL;
+    tail = NULL;
 
     //make timer
-    sprintf(time_left,"%ld seconds left!!\n",map.timeout.tv_usec);
+    sprintf(time_left,"%ld seconds left!!\n",map.timeout.tv_sec);
     data.label = gtk_label_new(time_left);
     data.counter = (int)map.timeout.tv_sec;
     gtk_grid_attach(GTK_GRID(main_grid), data.label, 2, 1, 1, 1);
-    g_timeout_add_seconds(1, (GSourceFunc)update_counter, &data);
+    g_timeout_add_seconds(1, (GSourceFunc)update_counter, &data); 
 
     //show icon
     if(userid==0){
@@ -701,12 +673,15 @@ int main (int argc, char * argv[])
         image = gtk_image_new_from_file("../image/player3.png");
     }
     gtk_grid_attach(GTK_GRID(main_grid), image, 2, 2, 1, 1); 
+    
 
-    //make score board
+    //make score boarg_timeout_add_seconds
     sprintf(scoreboard,"****Score Board****\n 1. %s: %d\n 2. %s: %d\n 3. %s: %d\n 4. %s: %d\n", map.users[0].name,map.users[0].score,map.users[1].name,map.users[1].score,map.users[2].name,map.users[2].score,map.users[3].name,map.users[3].score);
     score_label = gtk_label_new(scoreboard);
     gtk_grid_attach(GTK_GRID(main_grid), score_label, 2, 3, 1, 1);
-    g_timeout_add(1,(GSourceFunc)update_game_and_score_board,NULL);
+
+    g_timeout_add(1, (GSourceFunc)update_board_grid_and_score_board, NULL);
+
     gtk_widget_show_all(window);
     gtk_widget_grab_focus(window);
     pthread_t input_pid;

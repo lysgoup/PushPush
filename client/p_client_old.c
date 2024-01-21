@@ -59,8 +59,9 @@ void * input(void * arg);
 void * free_view(void * arg);
 void select_image(int i, int j);
 
+void update_board_grid();
+void update_score_board();
 gboolean update_counter(Timer *data);
-gboolean update_game_and_score_board();
 void on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer user_data);
 
 //Global
@@ -72,8 +73,6 @@ char myname[MAX_NAME_SIZE+1];
 int sock;
 int userid;
 char image_name[32];
-int modified;
-pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 // char* usernames[USER_COUNT];
 
 //Global for GTK
@@ -274,15 +273,15 @@ void init_view(int row, int col){
 }
 
 void update_view(){
-    pthread_mutex_lock(&lock);
-    char **temp = view;
     pthread_t free_pid;
-    if (pthread_create(&free_pid, NULL, (void*)free_view, (void*)temp)) {
+    if (pthread_create(&free_pid, NULL, (void*)free_view, (void*)old_view)) {
         perror("making thread failed\n");
         exit(EXIT_FAILURE);
     }
     pthread_detach(free_pid);
     // pthread_join(free_pid,NULL);
+
+    old_view = view;
 
     init_view(map.row, map.col);
 
@@ -306,8 +305,6 @@ void update_view(){
         char c = (map.users[i].id+4) + '0';
         view[map.users[i].base_y][map.users[i].base_x] = c;
     }
-    modified = 1;
-    pthread_mutex_unlock(&lock);
 }
 
 // if it was succeed return positive num, otherwise return -1
@@ -331,6 +328,8 @@ void * input(void * arg) {
 
         if (strncmp(buf, "FN", 2) == 0 || strncmp(buf, "TO", 2) == 0) {
             data.counter = -1; 
+            // gtk_label_set_text(GTK_LABEL(data.label), "Game Over!!");
+            gtk_widget_show_all(window);
             break;
         }
 
@@ -383,9 +382,9 @@ void * input(void * arg) {
         print_model();
         update_view(); 
         show_view();
-        // update_board_grid();
-        // update_score_board();
-        // gtk_widget_show_all(window);
+        update_board_grid();
+        update_score_board();
+        gtk_widget_show_all(window);
     }
 
     if (result == 1) {
@@ -447,52 +446,52 @@ void select_image(int i, int j){
     } 
 }
 
+void update_board_grid(){
+    if(board_grid == NULL){
+        printf("check1\n");
+        board_grid = gtk_grid_new();
+        gtk_widget_set_size_request(board_grid, 200, 200);
+        gtk_grid_attach(GTK_GRID(main_grid), board_grid, 0, 0, 1, 4);
+        for (int i = 0; i < map.row; i++) {
+            for (int j = 0; j < map.col; j++) {
+                select_image(i,j);
+                image = gtk_image_new_from_file(image_name);
+                gtk_grid_attach(GTK_GRID(board_grid), image, j, i, 1, 1);
+            }
+        }
+    }
+    else{
+        printf("check2\n");
+        for (int i = 0; i < map.row; i++) {
+            for (int j = 0; j < map.col; j++) {
+                if(old_view[i][j] != view[i][j]){
+                    image = gtk_grid_get_child_at(GTK_GRID(board_grid), j, i);
+                    select_image(i,j);
+                    gtk_image_set_from_file(GTK_IMAGE(image), image_name);
+                }
+            }
+        }
+    }
+    
+}
+
 gboolean update_counter(Timer *data) {
     char t_buffer[256];
-    if(data->counter > 0){
+    if(data->counter != -1){
         data->counter--;
         sprintf(t_buffer, "%d seconds left!!\n", data->counter);
     
         gtk_label_set_text(GTK_LABEL(data->label), t_buffer); 
     }
-    else if(data->counter == -1){
-        gtk_label_set_text(GTK_LABEL(data->label), "Game Over!!!\n");  
-    }
 
-    if (data->counter < 0) {
+    if (data->counter <= 0) {
         return FALSE; 
     } else {
         return TRUE;
     }
 }
 
-gboolean update_game_and_score_board() {
-    pthread_mutex_lock(&lock);
-    if(modified == 0) {
-        pthread_mutex_unlock(&lock); 
-        return TRUE;
-    }
-    for (int i = 0; i < map.row; i++) {
-        for (int j = 0; j < map.col; j++) {
-            if(old_view[i][j] != view[i][j]){
-                image = gtk_grid_get_child_at(GTK_GRID(board_grid), j, i);
-                select_image(i,j);
-                gtk_image_set_from_file(GTK_IMAGE(image), image_name);
-            }
-        }
-    }
-    char **temp = old_view;
-    pthread_t free_pid;
-    if (pthread_create(&free_pid, NULL, (void*)free_view, (void*)temp)) {
-        perror("making thread failed\n");
-        exit(EXIT_FAILURE);
-    }
-    pthread_detach(free_pid);
-
-    old_view = view;
-    view = NULL;
-    modified = 0;
-
+void update_score_board(){
     User * score_chart[USER_COUNT];
     for (int i = 0; i < USER_COUNT; i++) {
         score_chart[i] = &map.users[i];
@@ -500,8 +499,7 @@ gboolean update_game_and_score_board() {
     qsort(score_chart, 4, sizeof(User*), compare);
     sprintf(scoreboard,"****Score Board****\n 1. %s: %d\n 2. %s: %d\n 3. %s: %d\n 4. %s: %d\n", score_chart[0]->name,score_chart[0]->score,score_chart[1]->name,score_chart[1]->score,score_chart[2]->name,score_chart[2]->score,score_chart[3]->name,score_chart[3]->score);
     gtk_label_set_text(GTK_LABEL(score_label), scoreboard);
-    pthread_mutex_unlock(&lock);
-    return TRUE;
+    // gtk_grid_attach(GTK_GRID(main_grid), score_label, 2, 2, 1, 1);
 }
 
 void on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer user_data) {
@@ -666,19 +664,9 @@ int main (int argc, char * argv[])
     main_grid = gtk_grid_new();
     gtk_container_add(GTK_CONTAINER(window), main_grid);
     //make board grid
-    board_grid = gtk_grid_new();
-    gtk_widget_set_size_request(board_grid, 200, 200);
-    gtk_grid_attach(GTK_GRID(main_grid), board_grid, 0, 0, 1, 4);
-    for (int i = 0; i < map.row; i++) {
-        for (int j = 0; j < map.col; j++) {
-            select_image(i,j);
-            image = gtk_image_new_from_file(image_name);
-            gtk_grid_attach(GTK_GRID(board_grid), image, j, i, 1, 1);
-        }
-    }
-    old_view = view;
-    view = NULL;
-    modified = 0;
+    update_board_grid();
+    //make score and time grid
+    // time_and_score_grid = gtk_grid_new();
 
     //make timer
     sprintf(time_left,"%ld seconds left!!\n",map.timeout.tv_usec);
@@ -701,12 +689,13 @@ int main (int argc, char * argv[])
         image = gtk_image_new_from_file("../image/player3.png");
     }
     gtk_grid_attach(GTK_GRID(main_grid), image, 2, 2, 1, 1); 
+    
 
     //make score board
     sprintf(scoreboard,"****Score Board****\n 1. %s: %d\n 2. %s: %d\n 3. %s: %d\n 4. %s: %d\n", map.users[0].name,map.users[0].score,map.users[1].name,map.users[1].score,map.users[2].name,map.users[2].score,map.users[3].name,map.users[3].score);
     score_label = gtk_label_new(scoreboard);
     gtk_grid_attach(GTK_GRID(main_grid), score_label, 2, 3, 1, 1);
-    g_timeout_add(1,(GSourceFunc)update_game_and_score_board,NULL);
+
     gtk_widget_show_all(window);
     gtk_widget_grab_focus(window);
     pthread_t input_pid;
@@ -715,7 +704,9 @@ int main (int argc, char * argv[])
         exit(EXIT_FAILURE);
     }
     gtk_main();
+    printf("here1\n");
     pthread_join(input_pid, NULL);
+    printf("here2\n");
     close(sock);
     printf("THE END\n");
     return 0;
