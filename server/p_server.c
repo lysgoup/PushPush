@@ -1,3 +1,6 @@
+/*
+TODO: verify 수정
+*/
 #include <stdio.h>
 #include <jansson.h>
 #include <stdlib.h>
@@ -16,15 +19,15 @@
 #include <sys/select.h>
 
 #define BUF_SIZE 1024
-#define MAX_USER 4
-
+#define MAX_player 4
+int MAX_USER = MAX_player;
 int start_flag = 0;
 int user_count = 0;
-int user_sock[MAX_USER];
-char user_name[MAX_USER][9];
-pthread_t tid[MAX_USER];
+int user_sock[MAX_player];
+char user_name[MAX_player][9];
+pthread_t tid[MAX_player];
 int is_end = 0;
-char *json_name = "board1.json";
+char *json_name = "board4.json";
 pthread_mutex_t mutex_queue = PTHREAD_MUTEX_INITIALIZER;
 
 #ifdef DEBUG
@@ -42,7 +45,7 @@ char command_buf[10][3] = { "0R\0",
                             "0R\n",
                             "0R\n",
                             "0R\n",
-                            "0R\n",
+                            "0R\n", 
                             "0D\n",
                             "0D\n",
                             "0L\n",
@@ -70,7 +73,7 @@ typedef struct Model{
     int row;
     int col;
     struct timeval timeout;
-    user users[MAX_USER];
+    user users[MAX_player];
     pos *obstacles;
     int n_obstacles;
     pos *balls;
@@ -132,7 +135,7 @@ json_t *parse_json(FILE *json_data) {
     // ball
     ball = json_object_get(root, "ball");
     game.n_balls = (int)(json_array_size(ball));
-    game.balls = (pos *)malloc(sizeof(pos) * game.n_balls);
+    game.balls = (pos *)malloc(sizeof(pos) * game.n_balls); 
     // printf("Number of balls: %d\n", game.n_balls);
     // printf("ball: ");
     json_array_foreach(ball, index, json_value) {
@@ -150,6 +153,13 @@ int is_cell_empty(int x, int y){
     for(int i = 0; i < MAX_USER; i++){
         if(game.users[i].user_x == x && game.users[i].user_y == y){
             // printf("is_cell_empty[USER] \n");
+            return 0;
+        }
+    }
+    //base
+    for(int i = 0; i < MAX_USER; i++){
+        if(game.users[i].base_x == x && game.users[i].base_y == y){
+            // printf("is_cell_empty[base] \n");
             return 0;
         }
     }
@@ -222,17 +232,17 @@ void verify_command(char *command){
         if(!is_cell_empty(current_x,current_y + delta)){
             //막혀있는 것이 공이라면?
             for(int i = 0; i < game.n_balls; i++){ //무슨 공인가?
-                if(game.balls[i].x == current_x && game.balls[i].y == current_y + delta){
+                if(game.balls[i].x == current_x && game.balls[i].y == (current_y + delta)){
                     if(is_cell_empty(current_x, current_y + (2 * delta))){ //공 옆이 비었음. move ball!
                         game.balls[i].y += delta;
-                        game.users[player].user_y += delta;
+                        game.users[player].user_y += delta; 
                         add_command(command);
                     }
                     else{//공 옆이 막혀있음
                         //공이 베이스에 들어갔다면?
                         for(int j = 0; j < MAX_USER; j++){
-                            if(game.users[j].base_x == game.balls[i].x && game.users[j].base_y == game.balls[i].y + delta){
-                                //공 삭제 및 점수 증가.
+                            if(game.users[j].base_x == game.balls[i].x && game.users[j].base_y == (game.balls[i].y + delta)){
+                                //공 삭제 및 점수 증가. 
                                 game.balls[i] = game.balls[game.n_balls-1];
                                 game.n_balls -= 1; //free?
                                 game.users[j].score += 1;
@@ -247,12 +257,13 @@ void verify_command(char *command){
                                 break;
                             }
                         }
-
+                        
                     }
                     break;
                 }
             }
             // 못움직이는 상황 : 아무것도 안 함.
+            debug(printf("못움직여용\n"););
         }
         else{
            game.users[player].user_y += delta;
@@ -263,17 +274,18 @@ void verify_command(char *command){
         if(!is_cell_empty(current_x + delta ,current_y)){
             //막혀있는 것이 공이라면?
             for(int i = 0; i < game.n_balls; i++){ //무슨 공인가?
-                if(game.balls[i].x == current_x + delta && game.balls[i].y == current_y){
+                if(game.balls[i].x == (current_x + delta) && game.balls[i].y == current_y){
                     if(is_cell_empty(current_x + (2 * delta), current_y)){ //공 옆이 비었음. move ball!
+                        debug(printf("공 옆이 비었음. move ball!\n"););
                         game.balls[i].x += delta;
-                        game.users[player].user_x += delta;
+                        game.users[player].user_x += delta; 
                         add_command(command);
                         break;
                     }
                     else{
                         //공이 베이스에 들어갔다면?
                         for(int j = 0; j < MAX_USER; j++){
-                            if(game.users[j].base_x == game.balls[i].x + delta && game.users[j].base_y == game.balls[i].y){
+                            if(game.users[j].base_x == (game.balls[i].x + delta) && game.users[j].base_y == game.balls[i].y){
                                 //공 삭제 및 점수 증가.
                                 game.balls[i] = game.balls[game.n_balls-1];
                                 game.n_balls -= 1; //free?
@@ -292,6 +304,7 @@ void verify_command(char *command){
                     break;
                 }
             }
+            debug(printf("못움직여용\n"););
             // 못움직이는 상황 : 아무것도 안 함.
         }
         else{//빈공간이 있어서 움직일 수 있음
@@ -329,6 +342,9 @@ void client_thread(void * arg){
             char buf[2];
             if(read(user_sock[player], buf, 2) == 0){
                 printf("player: %s disconnected\n", game.users[player].name);
+                MAX_USER -= 1;
+                int temp = user_sock[player];
+                user_sock[player] = user_sock[MAX_USER];
                 return;
             }
             printf("player[%d]'s message:%s\n",player,buf);
@@ -371,28 +387,28 @@ void send_command(){
 
 int main(int argc, char *argv[])
 {
-    int serv_sock;
-    struct sockaddr_in serv_adr, clnt_adr;
-    socklen_t clnt_adr_sz;
+	int serv_sock;
+	struct sockaddr_in serv_adr, clnt_adr;
+	socklen_t clnt_adr_sz;
     char buf[BUF_SIZE];
 
-    if (argc != 2) {
-        printf("Usage: %s <port>\n", argv[0]);
-        exit(1);
-    }
+	if (argc != 2) {
+		printf("Usage: %s <port>\n", argv[0]);
+		exit(1);
+	}
 
     serv_sock = socket(PF_INET, SOCK_STREAM, 0);
-    memset(&serv_adr, 0, sizeof(serv_adr));
-    serv_adr.sin_family = AF_INET;
-    serv_adr.sin_addr.s_addr = htonl(INADDR_ANY);
-    serv_adr.sin_port = htons(atoi(argv[1]));
+	memset(&serv_adr, 0, sizeof(serv_adr));
+	serv_adr.sin_family = AF_INET;
+	serv_adr.sin_addr.s_addr = htonl(INADDR_ANY);
+	serv_adr.sin_port = htons(atoi(argv[1]));
 
-    if (bind(serv_sock, (struct sockaddr*) &serv_adr, sizeof(serv_adr)) == -1){
-        perror("bind()");
+	if (bind(serv_sock, (struct sockaddr*) &serv_adr, sizeof(serv_adr)) == -1){
+		perror("bind()");
         exit(EXIT_FAILURE);
     }
-    if (listen(serv_sock, 10) == -1){
-        perror("listen()");
+	if (listen(serv_sock, 10) == -1){
+		perror("listen()");
         exit(EXIT_FAILURE);
     }
 
@@ -404,19 +420,19 @@ int main(int argc, char *argv[])
         memset(user_name[i], 0, sizeof(user_name[i]));
     }
 
-    while (1){
+	while (1){
         if(user_count >= MAX_USER){
             break;
         }
 
-        adr_sz = sizeof(clnt_adr);
-        clnt_sock = accept(serv_sock, (struct sockaddr*)&clnt_adr, &adr_sz);
-        if (clnt_sock == -1){
-                continue;
+		adr_sz = sizeof(clnt_adr);
+		clnt_sock = accept(serv_sock, (struct sockaddr*)&clnt_adr, &adr_sz);
+		if (clnt_sock == -1){
+			continue;
         }
-
+		
         puts("new client connected...");
-
+        
         user_sock[user_count] = clnt_sock;
         memset(buf, 0, BUF_SIZE);
         if(read(clnt_sock, buf, BUF_SIZE) == -1){
@@ -429,21 +445,14 @@ int main(int argc, char *argv[])
         *arg_player = user_count;
 
         if (pthread_create(&tid[user_count], NULL, (void *)client_thread, arg_player) != 0) {
-            perror("pthread_create : ") ;
-            exit(EXIT_FAILURE) ;
-        }
-
+			perror("pthread_create : ") ;
+			exit(EXIT_FAILURE) ;
+		}
+        
         user_count += 1;
-    }
+	}
 
     //All users are connected.
-    // //TODO 1.send user-list.
-    // for(int i = 0; i < MAX_USER; i++){
-    //     for(int j = 0; j < MAX_USER; j++){
-    //         int written = write(user_sock[i], user_name[j], 9);
-    //         // printf("[%d] \"%s\": %d\n", user_sock[i], user_name[j], written);
-    //     }
-    // }
     //TODO 2.read JSON and make model.
 
     FILE *fp;
@@ -455,7 +464,7 @@ int main(int argc, char *argv[])
 
     json_t *root = parse_json(fp);
     char *json_str = json_dumps(root, JSON_ENCODE_ANY); //serialize
-
+    
     int json_str_size = strlen(json_str);
     printf("size : %d \n%s\n", json_str_size,json_str);
     for(int i = 0; i < MAX_USER; i++){
@@ -477,7 +486,7 @@ int main(int argc, char *argv[])
 
     for(int i = 0; i < MAX_USER; i++){
         write(user_sock[i], &timestamp, sizeof(struct timeval));
-    }
+    } 
     start_flag = 1;
     //TODO 4.make send_command thread
     pthread_t temptid;
