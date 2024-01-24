@@ -49,7 +49,6 @@ int compare(const void* a, const void* b);
 void show_view();
 int send_bytes(int fd, void * buf, size_t len);
 int recv_bytes(int fd, void * buf, size_t len);
-// void parse_json(int filesize);
 int read_mapinfo(char * map_info);
 void print_model();
 void init_view(int row, int col);
@@ -57,7 +56,7 @@ void update_view();
 int find_id(char * nickname);
 void * input(void * arg);
 void * free_view(void * arg);
-void select_image(int i, int j);
+char *select_image(int i, int j);
 
 gboolean update_counter(Timer *data);
 gboolean update_game_and_score_board();
@@ -71,10 +70,8 @@ struct timeval start_time;
 char myname[MAX_NAME_SIZE+1];
 int sock;
 int userid;
-char image_name[32];
 int modified;
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-// char* usernames[USER_COUNT];
 
 //Global for GTK
 GtkWidget *window;
@@ -132,7 +129,6 @@ int recv_bytes(int fd, void * buf, size_t len){
     while (acc < len) {
         size_t received ;
         received = recv(fd, p, len - acc, MSG_NOSIGNAL) ;
-        // printf("%ld: %s\n",received,(char*)buf);
         if (received == 0)
             return 1 ;
         p += received ;
@@ -144,7 +140,7 @@ int recv_bytes(int fd, void * buf, size_t len){
 
 // if it was succeed return 0, otherwise return 1
 int read_mapinfo(char * map_info) {
-    // parse the JSON data 
+    // parse the JSON data
     cJSON *json = cJSON_Parse(map_info); 
 
     if (json == NULL) { 
@@ -282,7 +278,6 @@ void update_view(){
         exit(EXIT_FAILURE);
     }
     pthread_detach(free_pid);
-    // pthread_join(free_pid,NULL);
 
     init_view(map.row, map.col);
 
@@ -373,7 +368,6 @@ void * input(void * arg) {
                         map.users[c].score++;
                         map.balls[i].x = map.balls[map.n_balls - 1].x;
                         map.balls[i].y = map.balls[map.n_balls - 1].y;
-                        // free(&map.balls[map.n_balls - 1]);
                         map.n_balls--;
                     }
                 }
@@ -383,16 +377,12 @@ void * input(void * arg) {
         print_model();
         update_view(); 
         show_view();
-        // update_board_grid();
-        // update_score_board();
-        // gtk_widget_show_all(window);
     }
 
     if (result == 1) {
         fprintf(stderr, "receive echoed direction failed\n");
     }
     
-
     return NULL;
 } 
 
@@ -408,43 +398,45 @@ void * free_view(void *arg){
     return NULL;
 }
 
-void select_image(int i, int j){
+char *select_image(int i, int j){
+    char *selected_image = (char *)malloc(sizeof(char)*32);
     if(view[i][j]=='\0'){
-        strcpy(image_name,"../image/background.png");
+        strcpy(selected_image,"../image/background.png");
     }
     else if(view[i][j]=='O'){
-        strcpy(image_name,"../image/tree.png");
+        strcpy(selected_image,"../image/tree.png");
     }
     else if(view[i][j]=='B'){
-        strcpy(image_name,"../image/egg.png");
+        strcpy(selected_image,"../image/egg.png");
     }
     else if(view[i][j]=='0'){
-        strcpy(image_name,"../image/player0.png");
+        strcpy(selected_image,"../image/player0.png");
     }
     else if(view[i][j]=='1'){
-        strcpy(image_name,"../image/player1.png");
+        strcpy(selected_image,"../image/player1.png");
     }
     else if(view[i][j]=='2'){
-        strcpy(image_name,"../image/player2.png");
+        strcpy(selected_image,"../image/player2.png");
     }
     else if(view[i][j]=='3'){
-        strcpy(image_name,"../image/player3.png");
+        strcpy(selected_image,"../image/player3.png");
     }
     else if(view[i][j]=='4'){
-        strcpy(image_name,"../image/base0.png");
+        strcpy(selected_image,"../image/base0.png");
     }
     else if(view[i][j]=='5'){
-        strcpy(image_name,"../image/base1.png");
+        strcpy(selected_image,"../image/base1.png");
     }
     else if(view[i][j]=='6'){
-        strcpy(image_name,"../image/base2.png");
+        strcpy(selected_image,"../image/base2.png");
     }
     else if(view[i][j]=='7'){
-        strcpy(image_name,"../image/base3.png");
+        strcpy(selected_image,"../image/base3.png");
     }
     else{
-        strcpy(image_name,"../image/ground.png");
+        strcpy(selected_image,"../image/ground.png");
     } 
+    return selected_image;
 }
 
 gboolean update_counter(Timer *data) {
@@ -476,8 +468,9 @@ gboolean update_game_and_score_board() {
         for (int j = 0; j < map.col; j++) {
             if(old_view[i][j] != view[i][j]){
                 image = gtk_grid_get_child_at(GTK_GRID(board_grid), j, i);
-                select_image(i,j);
-                gtk_image_set_from_file(GTK_IMAGE(image), image_name);
+                char *selected_image = select_image(i,j);
+                gtk_image_set_from_file(GTK_IMAGE(image), selected_image);
+                free(selected_image);
             }
         }
     }
@@ -568,22 +561,6 @@ int main (int argc, char * argv[])
         fprintf(stderr,"Failed to send user name\n");
         exit(EXIT_FAILURE);
     }
-    // shutdown(sock,SHUT_WR);
-
-    // user list 수신
-    // for(int i=0;i<4;i++){
-    //     if(recv_bytes(sock, buf, sizeof(buf))){
-    //         fprintf(stderr,"Failed to receive user list\n");
-    //         exit(EXIT_FAILURE);
-    //     };
-    //     usernames[i] = (char*)malloc(sizeof(char*));
-    //     strcpy(usernames[i],buf);
-    // }
-
-    // //! test
-    // for(int i=0;i<4;i++){
-    //     printf("username: %s\n", usernames[i]);
-    // }
     
     //JSON 파일 크기 수신
     if(recv_bytes(sock, &filesize, sizeof(filesize))){
@@ -593,24 +570,7 @@ int main (int argc, char * argv[])
     //! test
     printf("filesize: %d\n",filesize);
     
-    //JSON 파일 수신
-    // FILE * fp = fopen("map.json", "wb");
-    // size_t received = 0;
-    // size_t r = 0;
-    // size_t acc = 0;
-    // while(received < filesize){
-    //     acc = filesize-received;
-    //     if(sizeof(buf)>acc){
-    //         r = recv(sock, buf, acc, MSG_NOSIGNAL) ; 
-    //     }
-    //     else{
-    //         r = recv(sock, buf, sizeof(buf), MSG_NOSIGNAL) ;
-    //     }
-    //     received += r;
-    //     printf("%ld\n",received);
-    //     fwrite(buf,r,1,fp);
-    // }
-    // fclose(fp);
+    
     char map_info[filesize+1];
     char * p = map_info ;
     size_t acc = 0 ;
@@ -628,10 +588,9 @@ int main (int argc, char * argv[])
     printf("%s\n",map_info);
      
 
-    //TODO: JSON 파싱하고 모델 생성
+    //* JSON 파싱하고 모델 생성
     read_mapinfo(map_info);
     print_model();
-    // init_view(map.row, map.col);
     update_view();
     //! test
     show_view();
@@ -646,10 +605,7 @@ int main (int argc, char * argv[])
 
     userid = find_id(myname); 
 
-    // make thread
-
-    //TODO: Game Start
-    //gtk 시작
+    //* Game Start
     //initialize board
     gtk_init(&argc, &argv);
     //window setting
@@ -671,9 +627,10 @@ int main (int argc, char * argv[])
     gtk_grid_attach(GTK_GRID(main_grid), board_grid, 0, 0, 1, 4);
     for (int i = 0; i < map.row; i++) {
         for (int j = 0; j < map.col; j++) {
-            select_image(i,j);
-            image = gtk_image_new_from_file(image_name);
+            char *selected_image = select_image(i,j);
+            image = gtk_image_new_from_file(selected_image);
             gtk_grid_attach(GTK_GRID(board_grid), image, j, i, 1, 1);
+            free(selected_image);
         }
     }
     old_view = view;

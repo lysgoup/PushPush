@@ -27,32 +27,13 @@ int user_sock[MAX_player];
 char user_name[MAX_player][9];
 pthread_t tid[MAX_player];
 int is_end = 0;
-char *json_name = "board4.json";
+char *json_name = "board3.json";
 pthread_mutex_t mutex_queue = PTHREAD_MUTEX_INITIALIZER;
 
-#ifdef DEBUG
-    #define debug(fn) fn
-#else
-    #define debug(fn)
-#endif
 
-#if 1
 char command_buf[10][3];
 int head = 0, tail = 0;
-#else
-char command_buf[10][3] = { "0R\0",
-                            "0R\n",
-                            "0R\n",
-                            "0R\n",
-                            "0R\n",
-                            "0R\n", 
-                            "0D\n",
-                            "0D\n",
-                            "0L\n",
-                            "TO\n"
-                            };
-int head = 9, tail = 0;
-#endif
+
 
 typedef struct User{
     int user_x;
@@ -97,19 +78,14 @@ json_t *parse_json(FILE *json_data) {
     mapsize = json_object_get(root, "mapsize");
     game.row = json_integer_value(json_object_get(mapsize, "rows"));
     game.col = json_integer_value(json_object_get(mapsize, "cols"));
-    // printf("rows: %d, cols: %d\n", game.row, game.col);
 
     // timeout
     timeout = json_object_get(root, "timeout");
     int timeval = json_integer_value(timeout);
     game.timeout.tv_sec = timeval/1000;
     game.timeout.tv_usec = 0;
-    // printf("timeout: %ld\n", game.timeout.tv_sec);
-
-    // user
 
     user = json_object_get(root, "user");
-    // printf("users:\n");
     json_array_foreach(user, index, json_value) {
         game.users[index].id = json_integer_value(json_object_get(json_value, "id"));
         game.users[index].base_x = json_integer_value(json_array_get(json_object_get(json_value, "base"), 0));
@@ -118,7 +94,6 @@ json_t *parse_json(FILE *json_data) {
         game.users[index].user_y = json_integer_value(json_array_get(json_object_get(json_value, "user"), 1));
         json_object_set_new(json_value, "name", json_string(user_name[index]));
         strncpy(game.users[index].name, json_string_value(json_object_get(json_value, "name")), sizeof(game.users[index].name) - 1);
-        // printf("id=%d, baseX=%d, baseY=%d, userX=%d, userY=%d name=%s\n", game.users[index].id, game.users[index].base_x, game.users[index].base_y, game.users[index].user_x, game.users[index].user_y, game.users[index].name);
     }
 
     // obstacle
@@ -129,21 +104,16 @@ json_t *parse_json(FILE *json_data) {
     json_array_foreach(obstacle, index, json_value) {
         game.obstacles[index].x = json_integer_value(json_array_get(json_value, 0));
         game.obstacles[index].y = json_integer_value(json_array_get(json_value, 1));
-        // printf("obstacle: obstacleX=%d, obstacleY=%d\n", game.obstacles[index].x, game.obstacles[index].y);
     }
 
     // ball
     ball = json_object_get(root, "ball");
     game.n_balls = (int)(json_array_size(ball));
     game.balls = (pos *)malloc(sizeof(pos) * game.n_balls); 
-    // printf("Number of balls: %d\n", game.n_balls);
-    // printf("ball: ");
     json_array_foreach(ball, index, json_value) {
         game.balls[index].x = json_integer_value(json_array_get(json_value, 0));
         game.balls[index].y = json_integer_value(json_array_get(json_value, 1));
-        // printf("(ballX=%d, ballY=%d) ", game.balls[index].x, game.balls[index].y );
     }
-    // printf("\n");
 
     return root;
 }
@@ -152,37 +122,31 @@ int is_cell_empty(int x, int y){
     //user
     for(int i = 0; i < MAX_USER; i++){
         if(game.users[i].user_x == x && game.users[i].user_y == y){
-            // printf("is_cell_empty[USER] \n");
             return 0;
         }
     }
     //base
     for(int i = 0; i < MAX_USER; i++){
         if(game.users[i].base_x == x && game.users[i].base_y == y){
-            // printf("is_cell_empty[base] \n");
             return 0;
         }
     }
     //obstacle
     for(int i = 0; i < game.n_obstacles; i++){
         if(game.obstacles[i].x == x && game.obstacles[i].y == y){
-            // printf("is_cell_empty[obstacle] \n");
             return 0;
         }
     }
     //boarder
     if(x <= 0 || x >= game.col - 1){
-        // printf("is_cell_empty[boarder-x] \n");
         return 0;
     }
     if(y <= 0 || y >= game.row - 1){
-        // printf("is_cell_empty[boarder-y] \n");
         return 0;
     }
     //ball
     for(int i = 0; i < game.n_balls; i++){
         if(game.balls[i].x == x && game.balls[i].y == y){
-            // printf("is_cell_empty[ball] \n");
             return 0;
         }
     }
@@ -190,7 +154,6 @@ int is_cell_empty(int x, int y){
 }
 
 void add_command(char *command){
-    // printf("add_command(%s)\n",command);
     pthread_mutex_lock(&mutex_queue);
     if( ((head + 1)%10) != tail){
         strncpy(command_buf[head], command, 3);
@@ -212,7 +175,6 @@ void verify_command(char *command){
     //goal -> n_balls - 1
     int player = command[0] - '0';
     char direction = command[1];
-    // printf("command:%s player:%d direction:%c\n", command, player, direction);
     int current_x = game.users[player].user_x;
     int current_y = game.users[player].user_y;
 
@@ -248,7 +210,7 @@ void verify_command(char *command){
                                 game.users[j].score += 1;
                                 game.users[player].user_y += delta;
                                 add_command(command);
-                                printf("goal!! left:%d\n", game.n_balls);
+                                printf("goal!! %d balls remain\n", game.n_balls);
                                 //공이 더이상 없을 때 종료
                                 if(game.n_balls <= 0){
                                     char *fn = "FN";
@@ -263,7 +225,6 @@ void verify_command(char *command){
                 }
             }
             // 못움직이는 상황 : 아무것도 안 함.
-            debug(printf("못움직여용\n"););
         }
         else{
            game.users[player].user_y += delta;
@@ -276,7 +237,6 @@ void verify_command(char *command){
             for(int i = 0; i < game.n_balls; i++){ //무슨 공인가?
                 if(game.balls[i].x == (current_x + delta) && game.balls[i].y == current_y){
                     if(is_cell_empty(current_x + (2 * delta), current_y)){ //공 옆이 비었음. move ball!
-                        debug(printf("공 옆이 비었음. move ball!\n"););
                         game.balls[i].x += delta;
                         game.users[player].user_x += delta; 
                         add_command(command);
@@ -292,7 +252,6 @@ void verify_command(char *command){
                                 game.users[j].score += 1;
                                 game.users[player].user_x += delta;
                                 add_command(command);
-                                printf("goal!! left:%d\n", game.n_balls);
                                 if(game.n_balls <= 0){
                                     char *fn = "FN";
                                     add_command(fn);
@@ -304,7 +263,6 @@ void verify_command(char *command){
                     break;
                 }
             }
-            debug(printf("못움직여용\n"););
             // 못움직이는 상황 : 아무것도 안 함.
         }
         else{//빈공간이 있어서 움직일 수 있음
@@ -341,13 +299,13 @@ void client_thread(void * arg){
         } else {
             char buf[2];
             if(read(user_sock[player], buf, 2) == 0){
-                printf("player: %s disconnected\n", game.users[player].name);
-                MAX_USER -= 1;
+                printf("player: %s disconnected\n", user_name[player]);
+                user_count -= 1;
                 int temp = user_sock[player];
-                user_sock[player] = user_sock[MAX_USER];
+                user_sock[player] = user_sock[user_count];
+                strcpy(user_name[player], user_name[user_count]);
                 return;
             }
-            printf("player[%d]'s message:%s\n",player,buf);
             char *command = (char*)malloc(sizeof(char) * 2);
             command[0] = player + '0';
             strncpy(command + 1, buf+1, 1);
@@ -359,7 +317,6 @@ void client_thread(void * arg){
 
 void send_command(){
     while(is_end == 0){
-        // sleep(1);
         //No new command in buffer
         pthread_mutex_lock(&mutex_queue);
         if(head == tail){
@@ -370,9 +327,8 @@ void send_command(){
 
         //send command to users
         pthread_mutex_lock(&mutex_queue);
-        for(int i = 0; i < MAX_USER; i++){
+        for(int i = 0; i < user_count; i++){
             int written = write(user_sock[i], command_buf[tail], 2);
-            // printf("command sent: %s\n",command_buf[tail]);
             if(strcmp(command_buf[tail], "FN") == 0 || strcmp(command_buf[tail], "TO") == 0){
                 is_end = 1;
                 alarm(0);
@@ -453,7 +409,6 @@ int main(int argc, char *argv[])
 	}
 
     //All users are connected.
-    //TODO 2.read JSON and make model.
 
     FILE *fp;
     fp = fopen(json_name, "r");
@@ -473,9 +428,6 @@ int main(int argc, char *argv[])
     }
     json_decref(root);
 
-
-    //TODO 3.send timestamp.
-
     struct timeval timestamp;
 
     // gettimeofday 함수를 사용하여 현재 시간을 가져옵니다.
@@ -488,18 +440,16 @@ int main(int argc, char *argv[])
         write(user_sock[i], &timestamp, sizeof(struct timeval));
     } 
     start_flag = 1;
-    //TODO 4.make send_command thread
+
     pthread_t temptid;
     if (pthread_create(&temptid ,NULL, (void *)send_command, NULL) != 0) {
         perror("pthread_create - send_command : ") ;
         exit(EXIT_FAILURE) ;
     }
 
-    //TODO 5.start timer(signal).
     signal(SIGALRM, handle_timeout);
     alarm(game.timeout.tv_sec);
 
-    debug(add_command("0R"););
 
     //wait untill game end.
     for(int i = 0; i < MAX_USER; i++){
